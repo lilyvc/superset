@@ -204,6 +204,10 @@ ma_plugin = MarshmallowPlugin()
 # more rows fit within ``BQ_FETCH_MAX_MB``.
 _BQ_INITIAL_SAMPLE_ROWS = 1000
 
+# Pseudo-partitions listed in ``INFORMATION_SCHEMA.PARTITIONS`` that do not map
+# to a partition value, and sort after real partition ids.
+SPECIAL_PARTITION_IDS = ("__NULL__", "__UNPARTITIONED__", "__STREAMING_UNPARTITIONED__")
+
 
 class BigQueryParametersSchema(Schema):
     credentials_info = EncryptedString(
@@ -549,8 +553,9 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         query: Select,
         columns: list[ResultSetColumnType] | None = None,
     ) -> Select | None:
-        if partition_column := cls.get_time_partition_column(database, table):
-            max_partition_id = cls.get_max_partition_id(database, table)
+        if (partition_column := cls.get_time_partition_column(database, table)) and (
+            max_partition_id := cls.get_max_partition_id(database, table)
+        ):
             query = query.where(
                 column(partition_column) == func.PARSE_DATE("%Y%m%d", max_partition_id)
             )
@@ -582,7 +587,10 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         # Build the query
         query = select(
             func.max(partitions_table.c.partition_id).label("max_partition_id")
-        ).where(partitions_table.c.table_name == table.table)
+        ).where(
+            partitions_table.c.table_name == table.table,
+            partitions_table.c.partition_id.not_in(SPECIAL_PARTITION_IDS),
+        )
 
         # Compile to BigQuery SQL
         compiled_query = query.compile(
