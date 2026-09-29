@@ -707,7 +707,15 @@ def pivot_df(  # pylint: disable=too-many-locals, too-many-arguments, too-many-s
                 inserted_rows.append(subtotal.name)
                 row_prefix_depth[subtotal.name] = level
 
-    if percent_mode and rollup_levels:
+    # A database rollup can only stand in for a total while the cells still
+    # carry metric values: the "... as Fraction of ..." aggfuncs have already
+    # turned them into fractions, and the currency-context pivot carries
+    # currency-code sets, so those totals stay leaf-derived.
+    if (
+        rollup_levels
+        and aggfunc != CURRENCY_CONTEXT_AGGREGATION
+        and " as Fraction of " not in aggfunc
+    ):
         df = _apply_rollup_totals(
             df,
             rows,

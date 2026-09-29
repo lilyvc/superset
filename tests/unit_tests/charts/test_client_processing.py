@@ -2194,6 +2194,66 @@ def test_pivot_table_v2_rollup_totals_divide_by_themselves():
     assert pivoted.loc[("UK",), (total_label(), "")] == 1
 
 
+def test_pivot_table_v2_non_additive_totals_come_from_rollups():
+    """Plain totals read the database rollups, not a mean of means.
+
+    Without `showValuesAs` the export and report paths re-aggregated the
+    already-aggregated cells: a mean of the per-cell averages for an `Average`
+    metric. The database computed the correct value at each level -- 11 and 21
+    down the `{nation}` rollup, 18 across `{gender}`, 19 overall -- none of
+    which re-deriving from the leaves (10 and 20) can produce.
+    """
+    form_data = {
+        "groupbyRows": ["nation"],
+        "groupbyColumns": ["gender"],
+        "metrics": ["AVG(num)"],
+        "aggregateFunction": "Average",
+        "rowTotals": True,
+        "colTotals": True,
+    }
+    total = f"{_('Total')} (Average)"
+
+    pivoted = pivot_table_v2(grouping_sets_df(), form_data, apply_number_format=False)
+
+    # leaf cells are untouched
+    assert pivoted.loc[("US",), ("AVG(num)", "boy")] == 10
+    # each row total is the {nation} rollup, not the mean of its leaf cells
+    assert pivoted.loc[("US",), (total, "")] == 11
+    assert pivoted.loc[("UK",), (total, "")] == 21
+    # the total row is the {gender} rollup, not the mean of the leaf column
+    assert pivoted.loc[(total,), ("AVG(num)", "boy")] == 18
+    # the grand total is the {} rollup, not a mean of means
+    assert pivoted.loc[(total,), (total, "")] == 19
+
+
+def test_pivot_table_v2_totals_fall_back_without_a_rollup_level():
+    """A total whose level was not requested keeps its leaf-derived value."""
+    df = grouping_sets_df()
+    # drop the {gender} level, as an additive metric's query never asked for it
+    df = df[
+        ~(
+            (df["nation__superset_grouping"] == 1)
+            & (df["gender__superset_grouping"] == 0)
+        )
+    ]
+    form_data = {
+        "groupbyRows": ["nation"],
+        "groupbyColumns": ["gender"],
+        "metrics": ["AVG(num)"],
+        "aggregateFunction": "Average",
+        "rowTotals": True,
+        "colTotals": True,
+    }
+    total = f"{_('Total')} (Average)"
+
+    pivoted = pivot_table_v2(df, form_data, apply_number_format=False)
+
+    # the {nation} rollups still win
+    assert pivoted.loc[("US",), (total, "")] == 11
+    # but the column total falls back to re-aggregating the leaves
+    assert pivoted.loc[(total,), ("AVG(num)", "boy")] == 15
+
+
 def test_pivot_df_show_values_as_metrics_on_rows():
     pivoted = pivot_df(
         show_values_as_df(),
