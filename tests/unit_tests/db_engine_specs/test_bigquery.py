@@ -526,6 +526,91 @@ def test_get_time_partition_column_uses_catalog_in_table_reference(
     client.get_table.assert_called_once_with("other_project.my_dataset.my_table")
 
 
+def test_get_max_partition_id_excludes_special_partition_ids(
+    mocker: MockerFixture,
+) -> None:
+    """
+    Test that the INFORMATION_SCHEMA.PARTITIONS query only considers numeric
+    partition ids.
+
+    BigQuery reports pseudo-partitions like ``__NULL__`` and
+    ``__UNPARTITIONED__``, which sort after digits and would be picked by a
+    plain ``MAX(partition_id)``, producing an invalid ``PARSE_DATE`` call
+    downstream (apache/superset#44155).
+    """
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mock.Mock()
+    database.get_dialect.return_value = BigQueryDialect()
+
+    cursor_mock = mock.Mock()
+    cursor_mock.fetchone.return_value = ("20250901",)
+    connection_mock = mock.Mock()
+    connection_mock.cursor.return_value = cursor_mock
+    connection_mock.__enter__ = mock.Mock(return_value=connection_mock)
+    connection_mock.__exit__ = mock.Mock(return_value=None)
+    database.get_raw_connection.return_value = connection_mock
+
+    result = BigQueryEngineSpec.get_max_partition_id(
+        database,
+        Table("my_table", "my_dataset", "my_project"),
+    )
+
+    assert result == "20250901"
+    cursor_mock.execute.assert_called_once()
+    executed_query = cursor_mock.execute.call_args[0][0]
+    assert "INFORMATION_SCHEMA" in executed_query
+    assert "REGEXP_CONTAINS" in executed_query
+    assert "__NULL__" not in executed_query
+
+
+def test_where_latest_partition_numeric_id(mocker: MockerFixture) -> None:
+    """
+    Test that a numeric max partition id produces a ``PARSE_DATE`` predicate.
+    """
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mock.Mock()
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_max_partition_id", return_value="20250901"
+    )
+
+    query = mock.MagicMock()
+    BigQueryEngineSpec.where_latest_partition(database, Table("my_table"), query)
+
+    query.where.assert_called_once()
+    compiled = str(
+        query.where.call_args[0][0].compile(
+            dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert compiled == "`date` = PARSE_DATE('%Y%m%d', '20250901')"
+
+
+def test_where_latest_partition_no_numeric_partition(
+    mocker: MockerFixture,
+) -> None:
+    """
+    Test that no ``PARSE_DATE`` predicate is emitted when the table has no
+    numeric partition (eg, only ``__NULL__``/``__UNPARTITIONED__``).
+    """
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mock.Mock()
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    mocker.patch.object(BigQueryEngineSpec, "get_max_partition_id", return_value=None)
+
+    query = mock.MagicMock()
+    BigQueryEngineSpec.where_latest_partition(database, Table("my_table"), query)
+
+    query.where.assert_not_called()
+
+
 def test_adjust_engine_params_catalog_as_host() -> None:
     """
     Test passing a custom catalog.
