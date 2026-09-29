@@ -49,6 +49,7 @@ import { useToasts } from 'src/components/MessageToasts/withToasts';
 import { exportChart, getChartKey } from 'src/explore/exploreUtils';
 import downloadAsImage from 'src/utils/downloadAsImage';
 import downloadAsPdf from 'src/utils/downloadAsPdf';
+import { downloadBlob } from 'src/utils/export';
 import { getChartPermalink } from 'src/utils/urlUtils';
 import copyTextToClipboard from 'src/utils/copy';
 import { useHeaderReportMenuItems } from 'src/features/reports/ReportModal/HeaderReportDropdown';
@@ -609,10 +610,11 @@ export const useExploreAdditionalActionsMenu = (
   ) => {
     if (!columns?.length) return;
     try {
-      const XLSX = (await import(/* webpackChunkName: "xlsx" */ 'xlsx'))
-        .default;
+      const { default: ExcelJS } = await import(
+        /* webpackChunkName: "exceljs" */ 'exceljs'
+      );
 
-      // Build a flat array of objects keyed by backend column key
+      // Build a flat array of objects keyed by column label
       const data = rows.map(r => {
         const o: Record<string, unknown> = {};
         columns.forEach(c => {
@@ -632,25 +634,35 @@ export const useExploreAdditionalActionsMenu = (
         return o;
       });
 
-      // json_to_sheet infers headers from the first data object's keys, so
-      // with zero rows it would emit a completely blank sheet -- pass the
-      // column labels explicitly so an empty filtered view still exports a
-      // header-only sheet instead of nothing.
+      // Always emit the header row explicitly so an empty filtered view
+      // still exports a header-only sheet instead of nothing.
       const headers = columns.map(c => c.label ?? c.key);
-      const ws = XLSX.utils.json_to_sheet(data, {
-        header: headers,
-        skipHeader: false,
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Current View');
+      ws.addRow(headers);
+      data.forEach(d => {
+        ws.addRow(
+          headers.map(h => {
+            const v = d[h];
+            return v !== null && typeof v === 'object'
+              ? JSON.stringify(v)
+              : (v as string | number | boolean | null | undefined);
+          }),
+        );
       });
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Current View');
 
       // Autosize columns (roughly) by header length
-      const colWidths = headers.map(h => ({
-        wch: Math.max(10, String(h).length + 2),
-      }));
-      ws['!cols'] = colWidths;
+      headers.forEach((h, i) => {
+        ws.getColumn(i + 1).width = Math.max(10, String(h).length + 2);
+      });
 
-      XLSX.writeFile(wb, `${filename || 'current_view'}.xlsx`);
+      const buffer = await wb.xlsx.writeBuffer();
+      downloadBlob(
+        new Blob([buffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        `${filename || 'current_view'}.xlsx`,
+      );
     } catch {
       // If xlsx isn't available for some reason, fall back to CSV
       downloadClientCSV(rows, columns, filename || 'current_view');
