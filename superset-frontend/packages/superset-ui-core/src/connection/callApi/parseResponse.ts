@@ -25,6 +25,16 @@ const JSONbig = _JSONbig({
   constructorAction: 'preserve',
 });
 
+// Structural type for the BigNumber instances produced by json-bigint.
+interface BigNumberLike {
+  isInteger?: () => boolean;
+  isGreaterThan?: (other: number | string | BigNumberLike) => boolean;
+  isLessThan?: (other: number | string | BigNumberLike) => boolean;
+  isNaN?: () => boolean;
+  toNumber?: () => number;
+  toFixed?: () => string;
+}
+
 export default async function parseResponse<T extends ParseMethod = 'json'>(
   apiPromise: Promise<Response>,
   parseMethod?: T,
@@ -55,14 +65,15 @@ export default async function parseResponse<T extends ParseMethod = 'json'>(
   if (parseMethod === 'json-bigint') {
     const rawData = await response.text();
     const json = JSONbig.parse(rawData);
-    const decoded = cloneDeepWith(json, (value: any) => {
+    const decoded = cloneDeepWith(json, (value: BigNumberLike) => {
       if (
         value?.isInteger?.() === true &&
         (value?.isGreaterThan?.(Number.MAX_SAFE_INTEGER) ||
           value?.isLessThan?.(Number.MIN_SAFE_INTEGER))
       ) {
-        // toFixed() avoids scientific notation, which BigInt() rejects.
-        return BigInt(value.toFixed());
+        // toFixed() keeps full precision as a decimal string and avoids
+        // scientific notation. A native BigInt would throw on JSON.stringify.
+        return value.toFixed?.();
       }
       // // `json-bigint` could not handle floats well, see sidorares/json-bigint#62
       // // TODO: clean up after json-bigint>1.0.1 is released

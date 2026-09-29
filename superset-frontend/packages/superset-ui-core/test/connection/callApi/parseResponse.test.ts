@@ -155,9 +155,17 @@ describe('parseResponse()', () => {
       callApi({ url: mockBigIntUrl, method: 'GET' }),
       'json-bigint',
     );
+    // out-of-range integers become decimal strings: full precision and
+    // JSON.stringify-safe (native BigInt would throw on serialization)
+    expect(responseBigNumber.json.value).toBe('9223372036854775807');
+    expect(responseBigNumber.json.minus.value).toBe('-483729382918228373892');
     expect(`${responseBigNumber.json.value}`).toEqual('9223372036854775807');
     expect(`${responseBigNumber.json.minus.value}`).toEqual(
       '-483729382918228373892',
+    );
+    expect(() => JSON.stringify(responseBigNumber.json)).not.toThrow();
+    expect(JSON.parse(JSON.stringify(responseBigNumber.json)).value).toBe(
+      '9223372036854775807',
     );
     expect(responseBigNumber.json.number).toEqual(1234);
     expect(responseBigNumber.json.floatValue.plus).toEqual(0.3452211361231223);
@@ -194,12 +202,19 @@ describe('parseResponse()', () => {
       'json-bigint',
     );
 
+    expect(responseBigNumber.json.big_double).toBe(
+      '479970304572390500000000000000000',
+    );
+    expect(responseBigNumber.json.negative_big).toBe(
+      '-479970304572390500000000000000000',
+    );
     expect(`${responseBigNumber.json.big_double}`).toEqual(
       '479970304572390500000000000000000',
     );
     expect(`${responseBigNumber.json.negative_big}`).toEqual(
       '-479970304572390500000000000000000',
     );
+    expect(() => JSON.stringify(responseBigNumber.json)).not.toThrow();
     expect(responseBigNumber.json.small).toEqual(1);
   });
 
