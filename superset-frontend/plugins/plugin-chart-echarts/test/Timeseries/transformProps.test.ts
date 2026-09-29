@@ -647,17 +647,18 @@ describe('EchartsTimeseries transformProps', () => {
   });
 
   // Regression for #36401: query results containing integers beyond
-  // Number.MAX_SAFE_INTEGER are parsed as native BigInt (see
+  // Number.MAX_SAFE_INTEGER are parsed as exact decimal strings (see
   // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
   // In Stream mode, per-datum values are not routed through the Expand
-  // normalization, so a raw BigInt reaching getBaselineSeriesForStream's
-  // `0.5 * delta` weighting throws before the baseline series can render.
-  test('does not throw computing a stream baseline series with a BigInt metric value', () => {
+  // normalization, so a raw unsafe integer reaching
+  // getBaselineSeriesForStream's `0.5 * delta` weighting must already be a
+  // Number.
+  test('does not throw computing a stream baseline series with an unsafe integer metric value', () => {
     const streamQueriesDataTyped: ChartDataResponseResult[] = [
       createTestQueryData([
         {
           __timestamp: BASE_TIMESTAMP,
-          'San Francisco': BigInt('9007199254740993'),
+          'San Francisco': '9007199254740993',
           'New York': 220,
         },
         {

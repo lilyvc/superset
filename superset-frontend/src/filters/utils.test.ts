@@ -178,15 +178,16 @@ describe('Filter utils', () => {
     });
 
     test('Regression for #27510: formats large BIGINT column values as exact strings without precision loss', () => {
-      // A BIGINT column value with 16+ digits arrives as a native `bigint`
-      // (decoded from the `json-bigint` parse of the chart data response).
+      // A BIGINT column value beyond Number.MAX_SAFE_INTEGER arrives as an
+      // exact decimal string (decoded from the `json-bigint` parse of the
+      // chart data response).
       // Historically the filter UI rendered it as a raw BigNumber object
       // ({ s, e, c }), throwing React error #31, or coerced it through a JS
       // number and silently corrupted the trailing digits. The label
-      // formatter must turn it into its exact decimal string so the Select
+      // formatter must keep its exact decimal string so the Select
       // filter option renders correctly and the value keeps full precision.
       const formatter = getDataRecordFormatter();
-      const largeBigInt = 1234567890125123456n;
+      const largeBigInt = '1234567890125123456';
 
       expect(formatter(largeBigInt, GenericDataType.Numeric)).toEqual(
         '1234567890125123456',

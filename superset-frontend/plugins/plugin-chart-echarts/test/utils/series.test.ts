@@ -559,16 +559,15 @@ describe('extractSeries', () => {
   });
 
   // Regression for #36401: query results containing integers beyond
-  // Number.MAX_SAFE_INTEGER are parsed as native BigInt (see
+  // Number.MAX_SAFE_INTEGER are parsed as exact decimal strings (see
   // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
   // In "Expand" (100%/contribution) stacking mode, the raw datum value is
-  // divided by the row's total, which throws if the datum is still a
-  // BigInt at that point even though the total itself is a Number.
-  test('normalizes a BigInt datum value before dividing in Expand stack mode', () => {
+  // divided by the row's total, so it must be normalized to a Number first.
+  test('normalizes an unsafe integer datum value before dividing in Expand stack mode', () => {
     const data = [
       {
         __timestamp: '2000-01-01',
-        metric_a: BigInt('9007199254740993'),
+        metric_a: '9007199254740993',
         metric_b: 10,
       },
     ];
@@ -594,14 +593,15 @@ describe('extractSeries', () => {
 
   // Regression for #36401: the default series sort (SortSeriesType.Sum)
   // calls lodash's sumBy across all rows for a given series name. If one
-  // row's metric value was parsed as BigInt and another row's value for
-  // the same series is a Number, summing them throws before extractSeries
-  // ever reaches the Expand-mode conversion.
-  test('sorts series by sum without throwing when rows mix BigInt and Number values for the same series', () => {
+  // row's metric value was parsed as an unsafe integer string and another
+  // row's value for the same series is a Number, summing them must not
+  // concatenate or throw before extractSeries reaches the Expand-mode
+  // conversion.
+  test('sorts series by sum without throwing when rows mix unsafe integer and Number values for the same series', () => {
     const data = [
       {
         __timestamp: '2000-01-01',
-        a: BigInt('9007199254740993'),
+        a: '9007199254740993',
       },
       {
         __timestamp: '2000-02-01',
@@ -829,16 +829,16 @@ describe('extractDataTotalValues', () => {
   });
 
   // Regression for #36401: query results containing integers beyond
-  // Number.MAX_SAFE_INTEGER are parsed as native BigInt (see
+  // Number.MAX_SAFE_INTEGER are parsed as exact decimal strings (see
   // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
-  // Summing a BigInt datum value against the Number accumulator here
-  // throws instead of producing a stacked total.
-  test('sums a stacked datum containing a BigInt metric value without throwing', () => {
+  // Summing such a datum value against the Number accumulator must produce
+  // a numeric stacked total rather than a concatenated string.
+  test('sums a stacked datum containing an unsafe integer metric value', () => {
     const data: DataRecord[] = [
       {
         __timestamp: '2000-01-01',
         metric_a: 10,
-        metric_b: BigInt('9007199254740993'),
+        metric_b: '9007199254740993',
       },
     ];
     const { totalStackedValues, thresholdValues } = extractDataTotalValues(
@@ -849,7 +849,7 @@ describe('extractDataTotalValues', () => {
         xAxisCol: '__timestamp',
       },
     );
-    // BigInt('9007199254740993') exceeds Number.MAX_SAFE_INTEGER, so
+    // '9007199254740993' exceeds Number.MAX_SAFE_INTEGER, so
     // converting it to a Number loses precision (rounds to
     // 9007199254740992). The assertions reflect that expected,
     // best-effort numeric representation rather than exact BigInt math.

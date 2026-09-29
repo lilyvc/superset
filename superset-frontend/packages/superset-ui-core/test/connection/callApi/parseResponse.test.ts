@@ -155,10 +155,8 @@ describe('parseResponse()', () => {
       callApi({ url: mockBigIntUrl, method: 'GET' }),
       'json-bigint',
     );
-    expect(`${responseBigNumber.json.value}`).toEqual('9223372036854775807');
-    expect(`${responseBigNumber.json.minus.value}`).toEqual(
-      '-483729382918228373892',
-    );
+    expect(responseBigNumber.json.value).toBe('9223372036854775807');
+    expect(responseBigNumber.json.minus.value).toBe('-483729382918228373892');
     expect(responseBigNumber.json.number).toEqual(1234);
     expect(responseBigNumber.json.floatValue.plus).toEqual(0.3452211361231223);
     expect(responseBigNumber.json.floatValue.minus).toEqual(
@@ -194,13 +192,36 @@ describe('parseResponse()', () => {
       'json-bigint',
     );
 
-    expect(`${responseBigNumber.json.big_double}`).toEqual(
+    expect(responseBigNumber.json.big_double).toBe(
       '479970304572390500000000000000000',
     );
-    expect(`${responseBigNumber.json.negative_big}`).toEqual(
+    expect(responseBigNumber.json.negative_big).toBe(
       '-479970304572390500000000000000000',
     );
     expect(responseBigNumber.json.small).toEqual(1);
+  });
+
+  test('keeps integers beyond the safe range as exact, JSON-serializable decimal strings when `parseMethod=json-bigint`', async () => {
+    const mockUnsafeIntUrl = '/mock/get/unsafeInt';
+    fetchMock.get(
+      mockUnsafeIntUrl,
+      '{ "object_id": 32198334098493770513452193445, "neg": -9007199254740993, "safe": 9007199254740991 }',
+    );
+
+    const { json } = await parseResponse(
+      callApi({ url: mockUnsafeIntUrl, method: 'GET' }),
+      'json-bigint',
+    );
+
+    expect(typeof json.object_id).not.toBe('bigint');
+    expect(typeof json.neg).not.toBe('bigint');
+    expect(json.object_id).toBe('32198334098493770513452193445');
+    expect(json.neg).toBe('-9007199254740993');
+    expect(json.safe).toBe(9007199254740991);
+    expect(() => JSON.stringify(json)).not.toThrow();
+    expect(JSON.stringify(json)).toBe(
+      '{"object_id":"32198334098493770513452193445","neg":"-9007199254740993","safe":9007199254740991}',
+    );
   });
 
   test('rejects if request.ok=false', async () => {

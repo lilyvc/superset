@@ -54,6 +54,28 @@ import {
   SelectValue,
 } from './types';
 
+// Integers beyond Number.MAX_SAFE_INTEGER arrive as exact decimal strings.
+const INTEGER_STRING_REGEX = /^-?\d+$/;
+
+const toSortableNumeric = (value: unknown) =>
+  typeof value === 'string' && INTEGER_STRING_REGEX.test(value)
+    ? BigInt(value)
+    : value;
+
+const numericValueComparator = (a: LabeledValue, b: LabeledValue) => {
+  const aValue = toSortableNumeric(a.value);
+  const bValue = toSortableNumeric(b.value);
+  if (
+    (typeof aValue === 'bigint' || typeof aValue === 'number') &&
+    (typeof bValue === 'bigint' || typeof bValue === 'number')
+  ) {
+    if (aValue < bValue) return -1;
+    if (aValue > bValue) return 1;
+    return 0;
+  }
+  return propertyComparator('value')(a, b);
+};
+
 type DataMaskAction =
   | { type: 'ownState'; ownState: JsonObject }
   | {
@@ -402,9 +424,10 @@ export default function PluginFilterSelect(props: PluginFilterSelectProps) {
       // never reaches propertyComparator's numeric branch; numeric columns
       // sort by the raw `value` instead so "2, 10, 100" doesn't collapse
       // into lexicographic "10, 100, 2".
-      const comparator = propertyComparator(
-        datatype === GenericDataType.Numeric ? 'value' : 'label',
-      );
+      const comparator =
+        datatype === GenericDataType.Numeric
+          ? numericValueComparator
+          : propertyComparator('label');
       if (formData.sortAscending) {
         return comparator(a, b);
       }

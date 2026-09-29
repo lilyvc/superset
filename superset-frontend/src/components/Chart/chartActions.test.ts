@@ -374,7 +374,7 @@ describe('chart actions', () => {
       });
 
       expect(fetchMock.callHistory.calls(mockBigIntUrl)).toHaveLength(1);
-      expect((json as JsonObject).value.toString()).toEqual(expectedBigNumber);
+      expect((json as JsonObject).value).toBe(expectedBigNumber);
     });
 
     test('handleChartDataResponse should return result if GlobalAsyncQueries flag is disabled', async () => {

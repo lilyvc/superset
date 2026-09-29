@@ -219,6 +219,41 @@ describe('FilterableTable sorting - RTL', () => {
     expect(getColumnCellsText('columnB')).toEqual(['21', '0', '623'].join(''));
   });
 
+  test('sorts integers beyond the safe range (exact decimal strings) numerically', async () => {
+    const unsafeIntegerProps = {
+      orderedColumnKeys: ['columnE'],
+      data: [
+        { columnE: '32198334098493770513452193445' },
+        { columnE: 5 },
+        { columnE: '9007199254740993' },
+      ],
+      height: 500,
+    };
+    render(<FilterableTable {...unsafeIntegerProps} />);
+
+    const unsafeIntegerColumn = within(screen.getByRole('grid'))
+      .getByText('columnE')
+      .closest('[role=button]');
+
+    expect(getColumnCellsText('columnE')).toEqual(
+      ['32198334098493770513452193445', '5', '9007199254740993'].join(''),
+    );
+
+    if (unsafeIntegerColumn) {
+      await userEvent.click(unsafeIntegerColumn);
+    }
+    expect(getColumnCellsText('columnE')).toEqual(
+      ['5', '9007199254740993', '32198334098493770513452193445'].join(''),
+    );
+
+    if (unsafeIntegerColumn) {
+      await userEvent.click(unsafeIntegerColumn);
+    }
+    expect(getColumnCellsText('columnE')).toEqual(
+      ['32198334098493770513452193445', '9007199254740993', '5'].join(''),
+    );
+  });
+
   test('sorts floating numbers correctly', async () => {
     const floatProps = {
       orderedColumnKeys: ['columnC'],

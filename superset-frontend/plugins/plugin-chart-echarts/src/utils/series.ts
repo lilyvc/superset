@@ -397,6 +397,24 @@ export function getLegendLayoutResult({
   });
 }
 
+// Integers beyond Number.MAX_SAFE_INTEGER are parsed as exact decimal
+// strings (see
+// packages/superset-ui-core/src/connection/callApi/parseResponse.ts);
+// arithmetic on metric values needs them as (best-effort) Numbers.
+const UNSAFE_INTEGER_STRING_REGEX = /^-?\d{16,}$/;
+
+function toNumericValue<T extends DataRecordValue | undefined>(
+  value: T,
+): T | number {
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+  if (typeof value === 'string' && UNSAFE_INTEGER_STRING_REGEX.test(value)) {
+    return Number(value);
+  }
+  return value;
+}
+
 export function extractDataTotalValues(
   data: DataRecord[],
   opts: {
@@ -430,13 +448,9 @@ export function extractDataTotalValues(
           return prev;
         }
         const value = datum[curr] || 0;
-        // Query results with integers beyond Number.MAX_SAFE_INTEGER are
-        // parsed as native BigInt (see
-        // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
-        // Normalize to Number before summing so BigInt and Number values
-        // can be combined without throwing (see #36401).
-        const numericValue =
-          typeof value === 'bigint' ? Number(value) : (value as number);
+        // Normalize unsafe integers (BigInt or exact decimal strings, see
+        // toNumericValue) to Number before summing (see #36401).
+        const numericValue = toNumericValue(value) as number;
         return prev + numericValue;
       }, 0);
       totalStackedValues.push(values);
@@ -676,17 +690,18 @@ export function extractSeries(
   } = opts;
   if (data.length === 0) return [[], [], undefined];
   const rows: DataRecord[] = data.map(datum => {
-    // Query results with integers beyond Number.MAX_SAFE_INTEGER are
-    // parsed as native BigInt (see
-    // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
     // Normalize every metric value to Number here, before sorting/
     // aggregation (sortAndFilterSeries, sortRows) and stream-mode baseline
-    // calculations (getBaselineSeriesForStream) run, so BigInt and Number
-    // values can be combined without throwing (see #36401).
+    // calculations (getBaselineSeriesForStream) run, so unsafe integers and
+    // Number values can be combined (see #36401). The x-axis value keeps its
+    // exact representation.
     const normalized: DataRecord = {};
     Object.keys(datum).forEach(key => {
       const value = datum[key];
-      normalized[key] = typeof value === 'bigint' ? Number(value) : value;
+      normalized[key] =
+        key === xAxis && typeof value === 'string'
+          ? value
+          : toNumericValue(value);
     });
     normalized[xAxis] =
       datum[xAxis] === null && xAxisType === AxisType.Category
@@ -742,16 +757,9 @@ export function extractSeries(
           stack === StackControlsValue.Expand &&
           totalStackedValue !== undefined
         ) {
-          // Query results with integers beyond Number.MAX_SAFE_INTEGER are
-          // parsed as native BigInt (see
-          // packages/superset-ui-core/src/connection/callApi/parseResponse.ts).
           // totalStackedValue is always a Number (extractDataTotalValues
-          // normalizes it), so dividing a raw BigInt datum value by it
-          // throws; normalize to Number first (see #36401).
-          const numericValue =
-            typeof value === 'bigint'
-              ? Number(value)
-              : ((value || 0) as number);
+          // normalizes it), so normalize the datum value too (see #36401).
+          const numericValue = (toNumericValue(value) || 0) as number;
           value = numericValue / totalStackedValue;
         }
         return [row[xAxis], value];

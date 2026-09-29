@@ -799,15 +799,16 @@ describe('SelectFilterPlugin', () => {
     expect(options[2]).toHaveTextContent('100');
   });
 
-  test('sorts BIGINT filter values numerically when values decode to native bigint', async () => {
-    // BIGINT columns with 16+ digit values decode to native `bigint` (see
-    // json-bigint parsing of the chart data response), not `number`. Those
-    // values must still sort numerically rather than falling back to
-    // lexicographic string comparison ("10", "100", "2").
+  test('sorts BIGINT filter values numerically when values decode to exact decimal strings', async () => {
+    // BIGINT values beyond Number.MAX_SAFE_INTEGER decode to exact decimal
+    // strings (see json-bigint parsing of the chart data response), while
+    // smaller ones stay `number`. Those values must still sort numerically
+    // rather than falling back to lexicographic string comparison.
     const testData = [
-      { age: 10000000000000000n },
-      { age: 2000000000000000n },
-      { age: 100000000000000000n },
+      { age: '10000000000000000' },
+      { age: 2000000000000000 },
+      { age: '9007199254740993' },
+      { age: '100000000000000000' },
     ];
 
     const testProps = {
@@ -820,7 +821,7 @@ describe('SelectFilterPlugin', () => {
       },
       queriesData: [
         {
-          rowcount: 3,
+          rowcount: 4,
           colnames: ['age'],
           coltypes: [0],
           data: testData,
@@ -872,8 +873,9 @@ describe('SelectFilterPlugin', () => {
 
     const options = screen.getAllByRole('option');
     expect(options[0]).toHaveTextContent('2000000000000000');
-    expect(options[1]).toHaveTextContent('10000000000000000');
-    expect(options[2]).toHaveTextContent('100000000000000000');
+    expect(options[1]).toHaveTextContent('9007199254740993');
+    expect(options[2]).toHaveTextContent('10000000000000000');
+    expect(options[3]).toHaveTextContent('100000000000000000');
   });
 
   test('shows create option for multi-select creatable filter when typing', async () => {
