@@ -17,6 +17,7 @@
 import warnings
 
 import numpy as np
+import pandas as pd
 
 from superset.utils.pandas_postprocessing import aggregate
 from tests.unit_tests.fixtures.dataframes import categories_df
@@ -87,3 +88,53 @@ def test_aggregate_count_includes_nulls():
     df = aggregate(df=categories_df, groupby=["constant"], aggregates=aggregates)
     # idx_nulls has 101 rows total; np.ma.count returns all 101 (NaN included)
     assert series_to_list(df["null_count"])[0] == 101
+
+
+def test_aggregate_keeps_null_groupby_key():
+    df = pd.DataFrame(
+        {
+            "category": ["alpha", "alpha", None, None, "beta"],
+            "value": [10, 20, 100, 200, 50],
+        }
+    )
+    result = aggregate(
+        df=df,
+        groupby=["category"],
+        aggregates={"value": {"operator": "sum", "column": "value"}},
+    )
+    assert len(result) == 3
+    assert result["value"].sum() == 380
+    assert result.loc[result["category"].isnull(), "value"].tolist() == [300]
+    assert result.loc[result["category"] == "alpha", "value"].tolist() == [30]
+    assert result.loc[result["category"] == "beta", "value"].tolist() == [50]
+
+
+def test_aggregate_keeps_null_in_multi_column_groupby():
+    df = pd.DataFrame(
+        {
+            "a": ["x", "x", "x", "y"],
+            "b": ["p", None, None, "q"],
+            "value": [1, 2, 3, 4],
+        }
+    )
+    result = aggregate(
+        df=df,
+        groupby=["a", "b"],
+        aggregates={"value": {"operator": "sum", "column": "value"}},
+    )
+    assert len(result) == 3
+    assert result["value"].sum() == 10
+    null_rows = result[result["b"].isnull()]
+    assert null_rows["a"].tolist() == ["x"]
+    assert null_rows["value"].tolist() == [5]
+
+
+def test_aggregate_without_groupby_collapses_to_single_row():
+    df = pd.DataFrame({"category": ["alpha", None], "value": [10, 100]})
+    result = aggregate(
+        df=df,
+        groupby=[],
+        aggregates={"value": {"operator": "sum", "column": "value"}},
+    )
+    assert len(result) == 1
+    assert result["value"].tolist() == [110]
