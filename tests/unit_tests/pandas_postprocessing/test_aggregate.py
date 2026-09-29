@@ -17,6 +17,7 @@
 import warnings
 
 import numpy as np
+from pandas import DataFrame, isna
 
 from superset.utils.pandas_postprocessing import aggregate
 from tests.unit_tests.fixtures.dataframes import categories_df
@@ -87,3 +88,70 @@ def test_aggregate_count_includes_nulls():
     df = aggregate(df=categories_df, groupby=["constant"], aggregates=aggregates)
     # idx_nulls has 101 rows total; np.ma.count returns all 101 (NaN included)
     assert series_to_list(df["null_count"])[0] == 101
+
+
+def test_aggregate_keeps_null_groupby_key():
+    df = DataFrame(
+        {
+            "category": ["alpha", "alpha", None, None, "beta"],
+            "value": [10, 20, 100, 200, 50],
+        }
+    )
+    result = aggregate(
+        df=df,
+        groupby=["category"],
+        aggregates={"value": {"operator": "sum"}},
+    )
+    assert len(result) == 3
+    assert result["value"].sum() == 380
+    null_rows = result[result["category"].isna()]
+    assert series_to_list(null_rows["value"]) == [300]
+    assert series_to_list(result[result["category"] == "alpha"]["value"]) == [30]
+    assert series_to_list(result[result["category"] == "beta"]["value"]) == [50]
+
+
+def test_aggregate_keeps_null_groupby_key_multiple_columns():
+    df = DataFrame(
+        {
+            "category": ["alpha", "alpha", None, None, "beta"],
+            "sub": ["x", None, "x", "y", None],
+            "value": [10, 20, 100, 200, 50],
+        }
+    )
+    result = aggregate(
+        df=df,
+        groupby=["category", "sub"],
+        aggregates={"value": {"operator": "sum"}},
+    )
+    assert len(result) == 5
+    assert result["value"].sum() == 380
+    rows = {
+        (
+            None if isna(row["category"]) else row["category"],
+            None if isna(row["sub"]) else row["sub"],
+        ): row["value"]
+        for _, row in result.iterrows()
+    }
+    assert rows == {
+        ("alpha", "x"): 10,
+        ("alpha", None): 20,
+        (None, "x"): 100,
+        (None, "y"): 200,
+        ("beta", None): 50,
+    }
+
+
+def test_aggregate_without_groupby_returns_single_row():
+    df = DataFrame(
+        {
+            "category": ["alpha", "alpha", None, None, "beta"],
+            "value": [10, 20, 100, 200, 50],
+        }
+    )
+    result = aggregate(
+        df=df,
+        groupby=[],
+        aggregates={"value": {"operator": "sum"}},
+    )
+    assert list(result.columns) == ["value"]
+    assert series_to_list(result["value"]) == [380]

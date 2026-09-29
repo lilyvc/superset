@@ -17,6 +17,7 @@
 import warnings
 
 import pytest
+from pandas import DataFrame
 
 from superset.exceptions import InvalidPostProcessingError
 from superset.utils.core import PostProcessingBoxplotWhiskerType
@@ -44,7 +45,7 @@ def test_boxplot_tukey():
         "cars__outliers",
         "region",
     }
-    assert len(df) == 4
+    assert len(df) == 5
 
 
 def test_boxplot_mean_median_no_future_warning():
@@ -52,7 +53,7 @@ def test_boxplot_mean_median_no_future_warning():
     GroupBy.agg, else pandas raises a FutureWarning. Also verify the values
     match a plain pandas groupby, since the string and callable forms could
     silently diverge on a future pandas version."""
-    expected = names_df.groupby("region")["cars"].agg(["mean", "median"])
+    expected = names_df.groupby("region", dropna=False)["cars"].agg(["mean", "median"])
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
@@ -74,7 +75,7 @@ def test_boxplot_minmax_no_future_warning():
     raises a FutureWarning. Also verify the values match a plain pandas
     groupby, since the string and callable forms could silently diverge on a
     future pandas version."""
-    expected = names_df.groupby("region")["cars"].agg(["max", "min"])
+    expected = names_df.groupby("region", dropna=False)["cars"].agg(["max", "min"])
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
@@ -109,7 +110,7 @@ def test_boxplot_min_max():
         "cars__outliers",
         "region",
     }
-    assert len(df) == 4
+    assert len(df) == 5
 
 
 def test_boxplot_percentile():
@@ -132,7 +133,7 @@ def test_boxplot_percentile():
         "cars__outliers",
         "region",
     }
-    assert len(df) == 4
+    assert len(df) == 5
 
 
 def test_boxplot_percentile_incorrect_params():
@@ -194,4 +195,28 @@ def test_boxplot_type_coercion():
         "cars__outliers",
         "region",
     }
-    assert len(df) == 4
+    assert len(df) == 5
+
+
+@pytest.mark.parametrize(
+    "whisker_type",
+    [PostProcessingBoxplotWhiskerType.MINMAX, PostProcessingBoxplotWhiskerType.TUKEY],
+)
+def test_boxplot_keeps_null_groupby_key(whisker_type):
+    df = DataFrame(
+        {
+            "category": ["alpha", "alpha", None, None, "beta"],
+            "value": [10, 20, 100, 200, 50],
+        }
+    )
+    result = boxplot(
+        df=df,
+        groupby=["category"],
+        whisker_type=whisker_type,
+        metrics=["value"],
+    )
+    assert len(result) == 3
+    null_rows = result[result["category"].isna()]
+    assert series_to_list(null_rows["value__count"]) == [2]
+    assert series_to_list(null_rows["value__mean"]) == [150.0]
+    assert sorted(series_to_list(result["value__count"])) == [1, 2, 2]
