@@ -67,10 +67,12 @@ def compare(  # pylint: disable=too-many-arguments
         if compare_type == PandasPostprocessingCompare.DIFF:
             diff_df = s_df - c_df
         elif compare_type == PandasPostprocessingCompare.PCT:
-            diff_df = ((s_df - c_df) / c_df).astype(float).round(precision)
+            diff_df = (
+                ((s_df - c_df) / c_df.where(c_df != 0)).astype(float).round(precision)
+            )
         else:
             # compare_type == "ratio"
-            diff_df = (s_df / c_df).astype(float).round(precision)
+            diff_df = (s_df / c_df.where(c_df != 0)).astype(float).round(precision)
 
         diff_df.rename(
             columns={
