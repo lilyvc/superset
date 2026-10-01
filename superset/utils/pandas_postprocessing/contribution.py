@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from flask_babel import gettext as _
 from pandas import DataFrame, MultiIndex
 from pandas.api.types import infer_dtype, is_bool_dtype, is_numeric_dtype
@@ -134,8 +135,9 @@ def contribution(
                 else:
                     contribution_df[rename_col] = numeric_df_view[col] / total
         else:
-            numeric_df_view = numeric_df_view / numeric_df_view.values.sum(
-                axis=0, keepdims=True
+            column_sums = numeric_df_view.values.sum(axis=0, keepdims=True)
+            numeric_df_view = numeric_df_view / np.where(
+                column_sums == 0, np.nan, column_sums
             )
             contribution_df[rename_columns] = numeric_df_view
         return contribution_df
@@ -203,4 +205,6 @@ def calculate_row_contribution(
     row_sum_except_selected = df.loc[:, columns].sum(axis=1)
 
     # update the dataframe cells with the row contribution percentage
-    df[rename_columns] = df.loc[:, columns].div(row_sum_except_selected, axis=0)
+    df[rename_columns] = df.loc[:, columns].div(
+        row_sum_except_selected.where(row_sum_except_selected != 0), axis=0
+    )

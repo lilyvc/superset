@@ -23,6 +23,7 @@ from datetime import datetime
 from pprint import pformat
 from typing import Any, NamedTuple, TYPE_CHECKING
 
+import numpy as np
 from flask import current_app
 from flask_babel import gettext as _
 from jinja2.exceptions import TemplateError
@@ -691,7 +692,7 @@ class QueryObject:  # pylint: disable=too-many-instance-attributes
                 if operation == "resample":
                     options = self._resolve_resample_options(options)
                 df = func(df, **options)
-            return df
+            return df.replace([np.inf, -np.inf], np.nan)
 
     def _resolve_resample_options(self, options: dict[str, Any]) -> dict[str, Any]:
         """
