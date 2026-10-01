@@ -135,7 +135,7 @@ def contribution(
                 else:
                     contribution_df[rename_col] = numeric_df_view[col] / total
         else:
-            column_sums = numeric_df_view.sum(axis=0).to_numpy()
+            column_sums = numeric_df_view.values.sum(axis=0, keepdims=True)
             numeric_df_view = numeric_df_view / np.where(
                 column_sums == 0, np.nan, column_sums
             )
