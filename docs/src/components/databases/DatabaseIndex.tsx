@@ -19,7 +19,6 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Card,
   Row,
   Col,
   Statistic,
@@ -29,6 +28,7 @@ import {
   Select,
   Tooltip,
 } from 'antd';
+import { Card } from '../antd-compat';
 import {
   DatabaseOutlined,
   CheckCircleOutlined,
@@ -222,7 +222,8 @@ const DatabaseIndex: React.FC<DatabaseIndexProps> = ({ data }) => {
   const databaseList = useMemo(() => {
     const entries: TableEntry[] = [];
 
-    Object.entries(databases).forEach(([name, db]) => {
+    (Object.entries(databases) as [string, DatabaseInfo][]).forEach(
+      ([name, db]) => {
       // Add the main database
       // Use categories from documentation metadata (computed by Python) when available
       entries.push({

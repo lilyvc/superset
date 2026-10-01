@@ -19,7 +19,6 @@
 
 import React from 'react';
 import {
-  Card,
   Collapse,
   Table,
   Tag,
@@ -29,6 +28,7 @@ import {
   Divider,
   Tabs,
 } from 'antd';
+import { Card } from '../antd-compat';
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,

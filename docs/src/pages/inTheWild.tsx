@@ -18,7 +18,8 @@
  */
 
 import Layout from '@theme/Layout';
-import { Avatar, Card, Col, Collapse, Row, Typography } from 'antd';
+import { Avatar, Col, Collapse, Row, Typography } from 'antd';
+import { Card } from '../components/antd-compat';
 import { load } from 'js-yaml';
 import BlurredSection from '../components/BlurredSection';
 import SectionHeader from '../components/SectionHeader';
