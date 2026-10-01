@@ -17,10 +17,12 @@
 import io
 import sys
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from superset.constants import PandasPostprocessingCompare as PPC  # noqa: N817
-from superset.utils import pandas_postprocessing as pp
+from superset.utils import csv, pandas_postprocessing as pp
 from superset.utils.pandas_postprocessing.utils import FLAT_COLUMN_SEPARATOR
 from tests.unit_tests.fixtures.dataframes import multiple_metrics_df, timeseries_df2
 
@@ -136,6 +138,52 @@ def test_compare_ratio():
             },
         )
     )
+
+
+def test_compare_percentage_zero_baseline():
+    df = pd.DataFrame({"y": [100.0, 0.0, 2.0], "z": [0.0, 0.0, 4.0]})
+    result = pp.compare(
+        df=df,
+        source_columns=["y"],
+        compare_columns=["z"],
+        compare_type=PPC.PCT,
+    )
+    col = result["percentage__y__z"]
+    assert not np.isinf(col).any()
+    assert pd.isna(col[0])
+    assert pd.isna(col[1])
+    assert col[2] == -0.5
+    assert "inf" not in csv.df_to_escaped_csv(result, index=False)
+
+
+def test_compare_ratio_zero_baseline():
+    df = pd.DataFrame({"y": [100.0, 0.0, 2.0], "z": [0.0, 0.0, 4.0]})
+    result = pp.compare(
+        df=df,
+        source_columns=["y"],
+        compare_columns=["z"],
+        compare_type=PPC.RAT,
+    )
+    col = result["ratio__y__z"]
+    assert not np.isinf(col).any()
+    assert pd.isna(col[0])
+    assert pd.isna(col[1])
+    assert col[2] == 0.5
+
+
+@pytest.mark.parametrize("compare_type", [PPC.PCT, PPC.RAT])
+def test_compare_zero_baseline_int_dtype(compare_type):
+    df = pd.DataFrame({"y": [100, 0, 2], "z": [0, 0, 4]}, dtype="int64")
+    result = pp.compare(
+        df=df,
+        source_columns=["y"],
+        compare_columns=["z"],
+        compare_type=compare_type,
+    )
+    col = result[f"{compare_type}__y__z"]
+    assert not np.isinf(col).any()
+    assert pd.isna(col[0])
+    assert pd.isna(col[1])
 
 
 def test_compare_multi_index_column():

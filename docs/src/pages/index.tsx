@@ -19,9 +19,9 @@
 import { useRef, useState, useEffect, JSX } from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
-import { Card, Carousel, Flex } from 'antd';
+import { Carousel, Flex } from 'antd';
+import { Card, GHButton } from '../components/antd-compat';
 import styled from '@emotion/styled';
-import GitHubButton from 'react-github-btn';
 import { load } from 'js-yaml';
 import { mq } from '../utils';
 import SectionHeader from '../components/SectionHeader';
@@ -680,34 +680,34 @@ export default function Home(): JSX.Element {
             <img src="/img/community/line.png" alt="line" />
             <div className="github-section">
               <span className="github-button">
-                <GitHubButton
+                <GHButton
                   href="https://github.com/apache/superset"
                   data-size="large"
                   data-show-count="true"
                   aria-label="Star apache/superset on GitHub"
                 >
                   Star
-                </GitHubButton>
+                </GHButton>
               </span>
               <span className="github-button">
-                <GitHubButton
+                <GHButton
                   href="https://github.com/apache/superset/subscription"
                   data-size="large"
                   data-show-count="true"
                   aria-label="Watch apache/superset on GitHub"
                 >
                   Watch
-                </GitHubButton>
+                </GHButton>
               </span>
               <span className="github-button">
-                <GitHubButton
+                <GHButton
                   href="https://github.com/apache/superset/fork"
                   data-size="large"
                   data-show-count="true"
                   aria-label="Fork apache/superset on GitHub"
                 >
                   Fork
-                </GitHubButton>
+                </GHButton>
               </span>
             </div>
             <img src="/img/community/line.png" alt="line" />
