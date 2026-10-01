@@ -30,8 +30,7 @@ from superset.utils.pandas_postprocessing.utils import validate_column_args
 # Inferred value types of an object-dtype column that the contribution
 # arithmetic can consume. `decimal` covers columns holding `decimal.Decimal`
 # (how drivers such as psycopg2 return NUMERIC/DECIMAL metrics); `empty`
-# covers an all-null column, which contributes nothing but is harmless once
-# the nulls are filled with zeros.
+# covers an all-null column, which contributes nothing and divides to nulls.
 _ARITHMETIC_OBJECT_DTYPES = frozenset({"decimal", "empty"})
 
 
@@ -96,10 +95,7 @@ def contribution(
     :return: DataFrame with contributions.
     """
     contribution_df = df.copy()
-    # Filled out of place: the selection is a slice of `contribution_df`, and
-    # an in-place fill on a slice warns under pandas 2 and is dropped outright
-    # under copy-on-write.
-    numeric_df = _select_arithmetic_columns(contribution_df).fillna(0)
+    numeric_df = _select_arithmetic_columns(contribution_df)
     # verify column selections
     if columns:
         numeric_columns = numeric_df.columns.tolist()
@@ -134,9 +130,7 @@ def contribution(
                 else:
                     contribution_df[rename_col] = numeric_df_view[col] / total
         else:
-            numeric_df_view = numeric_df_view / numeric_df_view.values.sum(
-                axis=0, keepdims=True
-            )
+            numeric_df_view = numeric_df_view / numeric_df_view.sum(axis=0).to_numpy()
             contribution_df[rename_columns] = numeric_df_view
         return contribution_df
 
