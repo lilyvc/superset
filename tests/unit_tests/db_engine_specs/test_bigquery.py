@@ -23,7 +23,7 @@ from unittest import mock
 
 import pytest
 from pytest_mock import MockerFixture
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.sql import sqltypes
 from sqlalchemy_bigquery import BigQueryDialect
@@ -1134,3 +1134,309 @@ def test_identifier_quote_uses_backticks() -> None:
         "end": "`",
         "escape_by_doubling": False,
     }
+
+
+def test_get_max_partition_id_excludes_special_ids(mocker: MockerFixture) -> None:
+    """Test that the max partition query excludes special partition IDs."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.get_dialect.return_value = BigQueryDialect()
+    connection = database.get_raw_connection.return_value.__enter__.return_value
+    cursor = connection.cursor.return_value
+    cursor.fetchone.return_value = ("20240102",)
+
+    result = BigQueryEngineSpec.get_max_partition_id(
+        database, Table("events", "my_dataset", "my_project")
+    )
+
+    assert result == "20240102"
+    sql = " ".join(cursor.execute.call_args.args[0].split())
+    assert "partition_id" in sql
+    assert "NOT IN ('__NULL__', '__UNPARTITIONED__')" in sql
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [[{"name": "date", "column_name": "date", "type": sqltypes.DATE()}], None],
+)
+def test_where_latest_partition_date_day(
+    mocker: MockerFixture, columns: list[ResultSetColumnType] | None
+) -> None:
+    """Test filtering a DATE partition using a daily partition ID."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.get_dialect.return_value = BigQueryDialect()
+    connection = database.get_raw_connection.return_value.__enter__.return_value
+    cursor = connection.cursor.return_value
+    cursor.fetchone.return_value = ("20240102",)
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    query = select("*").select_from(text("`my_dataset`.`events`")).limit(100)
+
+    result = BigQueryEngineSpec.where_latest_partition(
+        database, Table("events", "my_dataset"), query, columns
+    )
+    assert result is not None
+    sql = " ".join(
+        str(
+            result.compile(
+                dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True}
+            )
+        ).split()
+    )
+
+    assert (
+        sql == "SELECT * FROM `my_dataset`.`events` WHERE `date` = "
+        "PARSE_DATE('%Y%m%d', '20240102') LIMIT 100"
+    )
+
+
+@pytest.mark.parametrize(
+    "partition_row",
+    [None, (None,), ("__NULL__",), ("__UNPARTITIONED__",), ("abc",), ("123",)],
+)
+def test_where_latest_partition_ignores_unusable_ids(
+    mocker: MockerFixture, partition_row: tuple[str | None] | None
+) -> None:
+    """Test that unusable partition IDs do not add a WHERE clause."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.get_dialect.return_value = BigQueryDialect()
+    connection = database.get_raw_connection.return_value.__enter__.return_value
+    cursor = connection.cursor.return_value
+    cursor.fetchone.return_value = partition_row
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    query = select("*").select_from(text("`my_dataset`.`events`")).limit(100)
+
+    result = BigQueryEngineSpec.where_latest_partition(
+        database, Table("events", "my_dataset"), query
+    )
+    assert result is not None
+    sql = " ".join(
+        str(
+            result.compile(
+                dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True}
+            )
+        ).split()
+    )
+
+    assert sql == "SELECT * FROM `my_dataset`.`events` LIMIT 100"
+
+
+@pytest.mark.parametrize(
+    ("partition_id", "where_clause"),
+    [
+        (
+            None,
+            None,
+        ),
+        (
+            "20240102",
+            "WHERE `date` = PARSE_DATE('%Y%m%d', '20240102')",
+        ),
+    ],
+)
+def test_select_star_latest_partition(
+    mocker: MockerFixture, partition_id: str | None, where_clause: str | None
+) -> None:
+    """Test that select_star applies only usable latest partitions."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.compile_sqla_query = lambda query, catalog, schema: str(
+        query.compile(dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True})
+    )
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_max_partition_id", return_value=partition_id
+    )
+    cols: list[ResultSetColumnType] = [
+        {
+            "name": "date",
+            "column_name": "date",
+            "type": sqltypes.DATE(),
+            "is_dttm": False,
+        }
+    ]
+
+    sql = BigQueryEngineSpec.select_star(
+        database=database,
+        table=Table("events", "my_dataset"),
+        dialect=BigQueryDialect(),
+        latest_partition=True,
+        show_cols=False,
+        indent=False,
+        cols=cols,
+    )
+    normalized_sql = " ".join(sql.split())
+    expected_sql = "SELECT * FROM `my_dataset`.`events`"
+    if where_clause:
+        expected_sql += f" {where_clause}"
+    expected_sql += " LIMIT 100"
+
+    assert normalized_sql == expected_sql
+
+
+@pytest.mark.parametrize(
+    ("column_type", "partition_id", "expected_sql"),
+    [
+        (
+            sqltypes.DATE(),
+            "202402",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "DATE_TRUNC(`date`, MONTH) = PARSE_DATE('%Y%m', '202402') LIMIT 100",
+        ),
+        (
+            sqltypes.DATE(),
+            "2024",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "DATE_TRUNC(`date`, YEAR) = PARSE_DATE('%Y', '2024') LIMIT 100",
+        ),
+        (
+            sqltypes.TIMESTAMP(),
+            "2024010101",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "TIMESTAMP_TRUNC(`date`, HOUR) = "
+            "PARSE_TIMESTAMP('%Y%m%d%H', '2024010101') LIMIT 100",
+        ),
+        (
+            sqltypes.TIMESTAMP(),
+            "20240102",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "TIMESTAMP_TRUNC(`date`, DAY) = PARSE_TIMESTAMP('%Y%m%d', '20240102') "
+            "LIMIT 100",
+        ),
+        (
+            sqltypes.DATETIME(),
+            "2024010101",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "DATETIME_TRUNC(`date`, HOUR) = "
+            "PARSE_DATETIME('%Y%m%d%H', '2024010101') LIMIT 100",
+        ),
+        (
+            sqltypes.DATETIME(),
+            "202402",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "DATETIME_TRUNC(`date`, MONTH) = "
+            "PARSE_DATETIME('%Y%m', '202402') LIMIT 100",
+        ),
+        (
+            None,
+            "2024010101",
+            "SELECT * FROM `my_dataset`.`events` WHERE "
+            "TIMESTAMP_TRUNC(`date`, HOUR) = "
+            "PARSE_TIMESTAMP('%Y%m%d%H', '2024010101') LIMIT 100",
+        ),
+    ],
+)
+def test_where_latest_partition_granularity(
+    mocker: MockerFixture,
+    column_type: sqltypes.TypeEngine | None,
+    partition_id: str,
+    expected_sql: str,
+) -> None:
+    """Test that partition ID length and column type select the SQL function."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.get_dialect.return_value = BigQueryDialect()
+    connection = database.get_raw_connection.return_value.__enter__.return_value
+    cursor = connection.cursor.return_value
+    cursor.fetchone.return_value = (partition_id,)
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    columns: list[ResultSetColumnType] | None = (
+        [
+            {
+                "name": "date",
+                "column_name": "date",
+                "type": column_type,
+                "is_dttm": False,
+            }
+        ]
+        if column_type
+        else None
+    )
+    query = select("*").select_from(text("`my_dataset`.`events`")).limit(100)
+
+    result = BigQueryEngineSpec.where_latest_partition(
+        database, Table("events", "my_dataset"), query, columns
+    )
+    assert result is not None
+    sql = " ".join(
+        str(
+            result.compile(
+                dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True}
+            )
+        ).split()
+    )
+
+    assert sql == expected_sql
+    assert "PARSE_DATE('%Y%m%d'" not in sql
+
+
+def test_get_extra_table_metadata_latest_partition(mocker: MockerFixture) -> None:
+    """Test that latest partition metadata reports the partition ID."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_max_partition_id", return_value="20240102"
+    )
+    engine = mocker.MagicMock()
+    engine.dialect = BigQueryDialect()
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_engine"
+    ).return_value.__enter__.return_value = engine
+    mocker.patch.object(BigQueryEngineSpec, "select_star", return_value="SELECT ...")
+
+    payload = BigQueryEngineSpec.get_extra_table_metadata(
+        database, Table("events", "my_dataset")
+    )
+
+    assert payload["partitions"]["latest"] == {"date": "20240102"}
+
+
+def test_get_extra_table_metadata_latest_partition_uses_filtered_query(
+    mocker: MockerFixture,
+) -> None:
+    """Test that metadata uses the filtered max-partition query."""
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+
+    database = mocker.MagicMock()
+    database.get_dialect.return_value = BigQueryDialect()
+    connection = database.get_raw_connection.return_value.__enter__.return_value
+    cursor = connection.cursor.return_value
+    cursor.fetchone.return_value = ("20240102",)
+    database.compile_sqla_query = lambda query, catalog, schema: str(
+        query.compile(dialect=BigQueryDialect(), compile_kwargs={"literal_binds": True})
+    )
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_time_partition_column", return_value="date"
+    )
+    engine = mocker.MagicMock()
+    engine.dialect = BigQueryDialect()
+    mocker.patch.object(
+        BigQueryEngineSpec, "get_engine"
+    ).return_value.__enter__.return_value = engine
+
+    payload = BigQueryEngineSpec.get_extra_table_metadata(
+        database, Table("events", "my_dataset")
+    )
+    sql = " ".join(cursor.execute.call_args.args[0].split())
+
+    assert payload["partitions"]["latest"] == {"date": "20240102"}
+    assert "partition_id" in sql
+    assert "NOT IN ('__NULL__', '__UNPARTITIONED__')" in sql
