@@ -32,7 +32,7 @@ from flask import current_app, g, has_app_context, has_request_context
 from flask_babel import gettext as __
 from marshmallow import fields, Schema
 from marshmallow.exceptions import ValidationError
-from sqlalchemy import column, func, types
+from sqlalchemy import column, func, literal_column, types
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.engine.reflection import Inspector
@@ -82,6 +82,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger()
+
+SPECIAL_PARTITION_IDS = ("__NULL__", "__UNPARTITIONED__")
+PARTITION_ID_FORMATS = {
+    4: ("YEAR", "%Y"),
+    6: ("MONTH", "%Y%m"),
+    8: ("DAY", "%Y%m%d"),
+    10: ("HOUR", "%Y%m%d%H"),
+}
 
 
 # BigQuery string escape sequences keyed off documented escapes in
@@ -549,20 +557,52 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         query: Select,
         columns: list[ResultSetColumnType] | None = None,
     ) -> Select | None:
-        if partition_column := cls.get_time_partition_column(database, table):
-            max_partition_id = cls.get_max_partition_id(database, table)
-            query = query.where(
-                column(partition_column) == func.PARSE_DATE("%Y%m%d", max_partition_id)
+        partition_column = cls.get_time_partition_column(database, table)
+        if not partition_column:
+            return query
+
+        max_partition_id = cls.get_max_partition_id(database, table)
+        if (
+            not max_partition_id
+            or not max_partition_id.isdigit()
+            or len(max_partition_id) not in PARTITION_ID_FORMATS
+        ):
+            return query
+
+        grain, fmt = PARTITION_ID_FORMATS[len(max_partition_id)]
+        column_type = (
+            next(
+                (col["type"] for col in columns if col["name"] == partition_column),
+                None,
+            )
+            if isinstance(columns, list)
+            else None
+        )
+        col = column(partition_column)
+        grain_ = literal_column(grain)
+        if isinstance(column_type, types.DATETIME):
+            predicate = func.DATETIME_TRUNC(col, grain_) == func.PARSE_DATETIME(
+                fmt, max_partition_id
+            )
+        elif isinstance(column_type, types.TIMESTAMP) or grain == "HOUR":
+            predicate = func.TIMESTAMP_TRUNC(col, grain_) == func.PARSE_TIMESTAMP(
+                fmt, max_partition_id
+            )
+        elif grain == "DAY":
+            predicate = col == func.PARSE_DATE(fmt, max_partition_id)
+        else:
+            predicate = func.DATE_TRUNC(col, grain_) == func.PARSE_DATE(
+                fmt, max_partition_id
             )
 
-        return query
+        return query.where(predicate)
 
     @classmethod
     def get_max_partition_id(
         cls,
         database: Database,
         table: Table,
-    ) -> Select | None:
+    ) -> str | None:
         # Compose schema from catalog and schema
         schema_parts = []
         if table.catalog:
@@ -582,7 +622,10 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
         # Build the query
         query = select(
             func.max(partitions_table.c.partition_id).label("max_partition_id")
-        ).where(partitions_table.c.table_name == table.table)
+        ).where(
+            partitions_table.c.table_name == table.table,
+            partitions_table.c.partition_id.notin_(SPECIAL_PARTITION_IDS),
+        )
 
         # Compile to BigQuery SQL
         compiled_query = query.compile(
