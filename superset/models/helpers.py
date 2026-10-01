@@ -3957,14 +3957,18 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
                 return value
 
             if isinstance(value, (float, int)) and not isinstance(value, bool):
-                epoch_ms: float = value
+                epoch: float = value
             elif isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value):
-                epoch_ms = int(value)
+                epoch = int(value)
             else:
                 return value
 
+            # Epochs with magnitude below 1e11 are seconds (1e11 s is year 5138),
+            # anything larger is milliseconds (1e11 ms is 1973-03-03).
+            epoch_s = epoch if abs(epoch) < 1e11 else epoch / 1000
+
             try:
-                dttm = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).replace(
+                dttm = datetime.fromtimestamp(epoch_s, tz=timezone.utc).replace(
                     tzinfo=None
                 )
             except (OverflowError, OSError, ValueError):

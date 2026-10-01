@@ -5280,6 +5280,150 @@ def test_temporal_non_numeric_string_filter_is_not_coerced() -> None:
     assert value == "2025-12-20"
 
 
+@pytest.mark.parametrize("value", [1700000000, "1700000000", 1700000000.0])
+def test_temporal_epoch_seconds_filter_is_coerced_for_bigquery(
+    value: int | float | str,
+) -> None:
+    """
+    Seconds-precision epochs must not be divided by 1000 and shifted to 1970.
+    """
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.models.helpers import ExploreMixin
+
+    result = ExploreMixin.filter_values_handler(
+        values=value,
+        operator=FilterOperator.GREATER_THAN_OR_EQUALS,
+        target_generic_type=GenericDataType.TEMPORAL,
+        target_native_type="DATE",
+        db_engine_spec=BigQueryEngineSpec,
+    )
+
+    assert isinstance(result, ColumnElement)
+    assert str(result) == "CAST('2023-11-14' AS DATE)"
+
+
+@pytest.mark.parametrize("value", [1700000000, "1700000000"])
+def test_temporal_epoch_seconds_filter_is_coerced_for_postgres(
+    value: int | str,
+) -> None:
+    from superset.db_engine_specs.postgres import PostgresEngineSpec
+    from superset.models.helpers import ExploreMixin
+
+    result = ExploreMixin.filter_values_handler(
+        values=value,
+        operator=FilterOperator.GREATER_THAN_OR_EQUALS,
+        target_generic_type=GenericDataType.TEMPORAL,
+        target_native_type="TIMESTAMP",
+        db_engine_spec=PostgresEngineSpec,
+    )
+
+    assert isinstance(result, ColumnElement)
+    assert str(result) == (
+        "TO_TIMESTAMP('2023-11-14 22:13:20.000000', 'YYYY-MM-DD HH24:MI:SS.US')"
+    )
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        # |value| < 1e11 is interpreted as epoch seconds
+        (99_999_999_999, "'5138-11-16 09:46:39'"),
+        ("99999999999", "'5138-11-16 09:46:39'"),
+        (-1_700_000_000, "'1916-02-18 01:46:40'"),
+        ("-1700000000", "'1916-02-18 01:46:40'"),
+        # |value| >= 1e11 is interpreted as epoch milliseconds
+        (100_000_000_000, "'1973-03-03 09:46:40'"),
+        ("100000000000", "'1973-03-03 09:46:40'"),
+        (-1_700_000_000_000, "'1916-02-18 01:46:40'"),
+    ],
+)
+def test_temporal_epoch_filter_seconds_vs_milliseconds_threshold(
+    value: int | str,
+    expected: str,
+) -> None:
+    from superset.db_engine_specs.sqlite import SqliteEngineSpec
+    from superset.models.helpers import ExploreMixin
+
+    result = ExploreMixin.filter_values_handler(
+        values=value,
+        operator=FilterOperator.GREATER_THAN_OR_EQUALS,
+        target_generic_type=GenericDataType.TEMPORAL,
+        target_native_type="DATETIME",
+        db_engine_spec=SqliteEngineSpec,
+    )
+
+    assert isinstance(result, ColumnElement)
+    assert str(result) == expected
+
+
+@pytest.mark.parametrize("value", [1700000000, 1700000000000])
+def test_get_sqla_query_temporal_epoch_filter_seconds_and_milliseconds(
+    mocker: MockerFixture,
+    session: Session,
+    value: int,
+) -> None:
+    """
+    End-to-end: a ``>=`` filter on a DATETIME column with an epoch in seconds
+    or milliseconds selects the same rows.
+    """
+    from superset.connectors.sqla.models import SqlaTable, TableColumn
+    from superset.models.core import Database
+
+    SqlaTable.metadata.create_all(session.get_bind())
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    database = Database(database_name="db", sqlalchemy_uri="sqlite://")
+
+    connection = engine.raw_connection()
+    connection.execute("CREATE TABLE ev (id INTEGER, ts DATETIME)")
+    connection.execute("INSERT INTO ev VALUES (1, '2023-11-01 00:00:00')")
+    connection.execute("INSERT INTO ev VALUES (2, '2023-11-20 00:00:00')")
+    connection.commit()
+
+    @contextmanager
+    def mock_get_sqla_engine(catalog=None, schema=None, **kwargs):
+        yield engine
+
+    mocker.patch.object(database, "get_sqla_engine", new=mock_get_sqla_engine)
+
+    table = SqlaTable(
+        database=database,
+        schema=None,
+        table_name="ev",
+        columns=[
+            TableColumn(column_name="id", type="INTEGER"),
+            TableColumn(column_name="ts", type="DATETIME", is_dttm=True),
+        ],
+    )
+
+    sqla_query = table.get_sqla_query(
+        columns=["id", "ts"],
+        filter=[{"col": "ts", "op": ">=", "val": value}],
+        extras={},
+        granularity=None,
+        is_timeseries=False,
+        metrics=[],
+        row_limit=100,
+    )
+
+    sql = str(
+        sqla_query.sqla_query.compile(
+            dialect=engine.dialect,
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "ts >= '2023-11-14 22:13:20'" in sql
+
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(sql).fetchall()
+
+    assert [row[0] for row in rows] == [2]
+
+
 def test_simple_metric_quotes_column_requiring_quoting(database: Database) -> None:
     """
     Regression for #30637: a SIMPLE adhoc metric that aggregates a column whose
