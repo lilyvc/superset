@@ -18,7 +18,8 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Input, Select } from 'antd';
+import { Row, Col, Statistic, Table, Tag, Input, Select } from 'antd';
+import { Card } from '../antd-compat';
 import {
   AppstoreOutlined,
   ApiOutlined,
