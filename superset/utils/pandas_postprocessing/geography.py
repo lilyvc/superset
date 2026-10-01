@@ -38,10 +38,13 @@ def geohash_decode(
     :return: DataFrame with decoded longitudes and latitudes
     """
     try:
-        lonlat_df = DataFrame()
-        lonlat_df["latitude"], lonlat_df["longitude"] = zip(
-            *df[geohash].apply(geohash_lib.decode), strict=False
-        )
+        if df.empty:
+            lonlat_df = DataFrame(columns=["latitude", "longitude"], dtype="float64")
+        else:
+            lonlat_df = DataFrame()
+            lonlat_df["latitude"], lonlat_df["longitude"] = zip(
+                *df[geohash].apply(geohash_lib.decode), strict=False
+            )
         return _append_columns(
             df, lonlat_df, {"latitude": latitude, "longitude": longitude}
         )
@@ -72,6 +75,7 @@ def geohash_encode(
                 latitude=row["latitude"], longitude=row["longitude"]
             ),
             axis=1,
+            result_type="reduce",
         )
         return _append_columns(df, encode_df, {"geohash": geohash})
     except ValueError as ex:
@@ -106,12 +110,17 @@ def geodetic_parse(
         return point[0], point[1], point[2]
 
     try:
-        geodetic_df = DataFrame()
-        (
-            geodetic_df["latitude"],
-            geodetic_df["longitude"],
-            geodetic_df["altitude"],
-        ) = zip(*df[geodetic].apply(_parse_location), strict=False)
+        if df.empty:
+            geodetic_df = DataFrame(
+                columns=["latitude", "longitude", "altitude"], dtype="float64"
+            )
+        else:
+            geodetic_df = DataFrame()
+            (
+                geodetic_df["latitude"],
+                geodetic_df["longitude"],
+                geodetic_df["altitude"],
+            ) = zip(*df[geodetic].apply(_parse_location), strict=False)
         columns = {"latitude": latitude, "longitude": longitude}
         if altitude:
             columns["altitude"] = altitude
