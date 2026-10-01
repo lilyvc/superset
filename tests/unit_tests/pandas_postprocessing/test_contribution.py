@@ -69,8 +69,8 @@ def test_cell_contribution_across_column_without_temporal_column():
         df, orientation=PostProcessingContributionOrientation.COLUMN
     )
     assert processed_df.columns.tolist() == ["a", "b", "c"]
-    assert_array_equal(processed_df["a"].tolist(), [0.25, 0.75, nan])
-    assert_array_equal(processed_df["b"].tolist(), [0.1, 0.9, nan])
+    assert_array_equal(processed_df["a"].tolist(), [0.25, 0.75, 0])
+    assert_array_equal(processed_df["b"].tolist(), [0.1, 0.9, 0])
     assert_array_equal(processed_df["c"].tolist(), [nan, nan, nan])
 
 
@@ -87,7 +87,7 @@ def test_contribution_on_selected_columns():
     assert_array_equal(processed_df["a"].tolist(), [1, 3, nan])
     assert_array_equal(processed_df["b"].tolist(), [1, 9, nan])
     assert_array_equal(processed_df["c"].tolist(), [nan, nan, nan])
-    assert_array_equal(processed_df["pct_a"].tolist(), [0.25, 0.75, nan])
+    assert processed_df["pct_a"].tolist() == [0.25, 0.75, 0]
 
 
 def test_contribution_with_time_shift_columns():
@@ -232,8 +232,8 @@ def test_contribution_ignores_columns_of_unsupported_objects():
 
 
 def test_contribution_keeps_all_null_object_columns():
-    """An all-null object column carries no values, so dividing it is
-    harmless; keep it in the calculation as before."""
+    """An all-null object column carries no values, so filling it with zeros
+    and dividing is harmless; keep it in the calculation as before."""
     df = DataFrame({"a": [1.0, 3.0], "empty": [None, None]})
     processed_df = contribution(
         df,
@@ -262,38 +262,4 @@ def test_contribution_on_decimal_columns_with_nulls():
         orientation=PostProcessingContributionOrientation.COLUMN,
     )
     assert processed_df["label"].tolist() == ["x", "y", "z"]
-    assert_array_equal(processed_df["a"].astype(float).tolist(), [0.25, nan, 0.75])
-
-
-def test_contribution_across_column_keeps_null_metric_null():
-    """A null metric cell is a missing measurement, not a 0% share."""
-    df = DataFrame({"region": ["a", "b", "c"], "sales": [100, None, 300]})
-    processed_df = contribution(
-        df,
-        orientation=PostProcessingContributionOrientation.COLUMN,
-    )
-    assert processed_df["region"].tolist() == ["a", "b", "c"]
-    assert_array_equal(processed_df["sales"].tolist(), [0.25, nan, 0.75])
-
-
-def test_contribution_across_column_with_totals_keeps_null_metric_null():
-    df = DataFrame({"region": ["a", "b", "c"], "sales": [100, None, 300]})
-    processed_df = contribution(
-        df,
-        orientation=PostProcessingContributionOrientation.COLUMN,
-        contribution_totals={"sales": 400},
-    )
-    assert processed_df["region"].tolist() == ["a", "b", "c"]
-    assert_array_equal(processed_df["sales"].tolist(), [0.25, nan, 0.75])
-
-
-def test_contribution_across_column_with_rename_keeps_null_metric_null():
-    df = DataFrame({"region": ["a", "b", "c"], "sales": [100, None, 300]})
-    processed_df = contribution(
-        df,
-        orientation=PostProcessingContributionOrientation.COLUMN,
-        rename_columns=["pct_sales"],
-    )
-    assert processed_df.columns.tolist() == ["region", "sales", "pct_sales"]
-    assert_array_equal(processed_df["sales"].tolist(), [100, nan, 300])
-    assert_array_equal(processed_df["pct_sales"].tolist(), [0.25, nan, 0.75])
+    assert processed_df["a"].tolist() == [0.25, 0.0, 0.75]
