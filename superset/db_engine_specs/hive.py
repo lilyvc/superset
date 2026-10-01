@@ -52,6 +52,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+HIVE_DEFAULT_PARTITION = "__HIVE_DEFAULT_PARTITION__"
+
 
 def upload_to_s3(filename: str, upload_prefix: str, table: Table) -> str:
     """
@@ -534,12 +536,24 @@ class HiveEngineSpec(PrestoEngineSpec):
     @classmethod
     def _latest_partition_from_df(cls, df: pd.DataFrame) -> list[str] | None:
         """Hive partitions look like ds={partition name}/ds={partition name}"""
-        if not df.empty:
-            return [
-                partition_str.split("=")[1]
-                for partition_str in df.iloc[:, 0].max().split("/")
-            ]
-        return None
+        if df.empty:
+            return None
+        partitions = [
+            [part.split("=")[1] for part in partition_str.split("/")]
+            for partition_str in df.iloc[:, 0]
+        ]
+        # rows with NULL/empty keys land in the default partition; not real data
+        partitions = [p for p in partitions if HIVE_DEFAULT_PARTITION not in p]
+        if not partitions:
+            return None
+        # compare key by key, numerically for digit-only values (hour=10 > hour=9)
+        return max(
+            partitions,
+            key=lambda values: [
+                (True, int(value), value) if value.isdecimal() else (False, 0, value)
+                for value in values
+            ],
+        )
 
     @classmethod
     def _partition_query(  # pylint: disable=all

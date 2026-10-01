@@ -274,3 +274,129 @@ def test_spark_identifier_quote_uses_backticks() -> None:
         "end": "`",
         "escape_by_doubling": True,
     }
+
+
+@pytest.mark.parametrize(
+    "spec_path",
+    [
+        "superset.db_engine_specs.hive.HiveEngineSpec",
+        "superset.db_engine_specs.spark.SparkEngineSpec",
+    ],
+)
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        (["ds=01-01-19"], ["01-01-19"]),
+        (
+            ["ds=01-01-19", "ds=01-03-19", "ds=01-02-19"],
+            ["01-03-19"],
+        ),
+        (["ds=01-01-19/hour=1"], ["01-01-19", "1"]),
+        (
+            [
+                "ds=01-01-19/hour=1",
+                "ds=01-03-19/hour=1",
+                "ds=01-02-19/hour=2",
+            ],
+            ["01-03-19", "1"],
+        ),
+        (
+            [
+                "ds=2025-08-31",
+                "ds=2025-09-01",
+                "ds=__HIVE_DEFAULT_PARTITION__",
+            ],
+            ["2025-09-01"],
+        ),
+        (
+            ["ds=2025-09-01/hour=9", "ds=2025-09-01/hour=10"],
+            ["2025-09-01", "10"],
+        ),
+        (["ds=__HIVE_DEFAULT_PARTITION__"], None),
+        (
+            [
+                "ds=2025-09-01/hour=__HIVE_DEFAULT_PARTITION__",
+                "ds=2025-08-31/hour=23",
+            ],
+            ["2025-08-31", "23"],
+        ),
+        ([], None),
+    ],
+)
+def test_latest_partition_from_df(
+    spec_path: str,
+    rows: list[str],
+    expected: list[str] | None,
+) -> None:
+    from importlib import import_module
+
+    import pandas as pd
+
+    module_path, spec_name = spec_path.rsplit(".", maxsplit=1)
+    spec = getattr(import_module(module_path), spec_name)
+
+    assert spec._latest_partition_from_df(pd.DataFrame({"partition": rows})) == expected
+
+
+@pytest.mark.parametrize(
+    "cols,rows,expected_sql",
+    [
+        (
+            ["ds"],
+            [
+                "ds=2025-08-31",
+                "ds=2025-09-01",
+                "ds=__HIVE_DEFAULT_PARTITION__",
+            ],
+            "SELECT x \nFROM t \nWHERE ds = '2025-09-01'",
+        ),
+        (
+            ["ds", "hour"],
+            ["ds=2025-09-01/hour=9", "ds=2025-09-01/hour=10"],
+            "SELECT x \nFROM t \nWHERE ds = '2025-09-01' AND hour = '10'",
+        ),
+        (["ds"], ["ds=__HIVE_DEFAULT_PARTITION__"], None),
+    ],
+)
+def test_where_latest_partition_skips_default_partition(
+    app_context: None,
+    cols: list[str],
+    rows: list[str],
+    expected_sql: str | None,
+) -> None:
+    from unittest.mock import MagicMock
+
+    import pandas as pd
+    from sqlalchemy import column, select, table
+
+    from superset.db_engine_specs.hive import HiveEngineSpec
+    from superset.extensions import cache_manager
+    from superset.sql.parse import Table
+
+    cache_manager.data_cache.clear()
+    database = MagicMock()
+    database.get_indexes.return_value = [{"column_names": cols}]
+    database.get_df.return_value = pd.DataFrame({"partition": rows})
+
+    query = HiveEngineSpec.where_latest_partition(
+        database,
+        Table("t", "s"),
+        select(column("x")).select_from(table("t")),
+        columns=[
+            {
+                "name": col,
+                "column_name": col,
+                "type": "VARCHAR",
+                "is_dttm": False,
+            }
+            for col in cols
+        ],
+    )
+
+    if expected_sql is None:
+        assert query is None
+    else:
+        assert query is not None
+        assert (
+            str(query.compile(compile_kwargs={"literal_binds": True})) == expected_sql
+        )
