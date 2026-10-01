@@ -91,6 +91,39 @@ def test_cum_with_gap():
     assert series_to_list(post_df["y2"]) == [1.0, 3.0, 3.0, 7.0]
 
 
+@pytest.mark.parametrize(
+    "operator,values,expected",
+    [
+        ("sum", [1, None, 2, 3], [1, 1, 3, 6]),
+        ("prod", [2, None, 3, 4], [2, 2, 6, 24]),
+        ("min", [5, None, 3, 7], [5, 5, 3, 3]),
+        ("max", [-5, None, -3, -9], [-5, -5, -3, -3]),
+    ],
+)
+def test_cum_with_gap_all_operators(operator, values, expected):
+    df = pd.DataFrame({"y": values}, dtype=float)
+    post_df = pp.cum(df=df, columns={"y": "y2"}, operator=operator)
+    assert series_to_list(post_df["y2"]) == expected
+    assert series_to_list(post_df["y"]) == [
+        None if v is None else float(v) for v in values
+    ]
+
+
+@pytest.mark.parametrize(
+    "operator,values,expected",
+    [
+        ("sum", [None, 5, 3], [0, 5, 8]),
+        ("prod", [None, 5, 3], [None, 5, 15]),
+        ("min", [None, 5, 3], [None, 5, 3]),
+        ("max", [None, 5, 3], [None, 5, 5]),
+    ],
+)
+def test_cum_with_leading_gap(operator, values, expected):
+    df = pd.DataFrame({"y": values}, dtype=float)
+    post_df = pp.cum(df=df, columns={"y": "y"}, operator=operator)
+    assert series_to_list(post_df["y"]) == expected
+
+
 def test_cum_after_pivot_with_single_metric():
     pivot_df = pp.pivot(
         df=single_metric_df,

@@ -46,7 +46,6 @@ def cum(
     """
     columns = columns or {}
     df_cum = df.loc[:, columns.keys()]
-    df_cum = df_cum.fillna(0)
     operation = "cum" + operator
     if operation not in ALLOWLIST_CUMULATIVE_FUNCTIONS or not hasattr(
         df_cum, operation
@@ -54,5 +53,9 @@ def cum(
         raise InvalidPostProcessingError(
             _("Invalid cumulative operator: %(operator)s", operator=operator)
         )
-    df_cum = _append_columns(df, getattr(df_cum, operation)(), columns)
+    if operation == "cumsum":
+        df_cum = df_cum.fillna(0).cumsum()
+    else:
+        df_cum = getattr(df_cum, operation)().ffill()
+    df_cum = _append_columns(df, df_cum, columns)
     return df_cum
