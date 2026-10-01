@@ -3963,6 +3963,12 @@ class ExploreMixin:  # pylint: disable=too-many-public-methods
             else:
                 return value
 
+            # Only JavaScript epoch milliseconds are coerced. Smaller magnitudes
+            # (before 1973-03-03 in ms) are more likely date literals such as
+            # YYYYMMDD, bare years or epoch seconds, so pass them through as-is.
+            if abs(epoch_ms) < 1e11:
+                return value
+
             try:
                 dttm = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).replace(
                     tzinfo=None

@@ -5280,6 +5280,93 @@ def test_temporal_non_numeric_string_filter_is_not_coerced() -> None:
     assert value == "2025-12-20"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [1700000000, "1700000000", 1700000000000, "1700000000000", "20231114", "2023"],
+)
+@pytest.mark.parametrize(
+    "engine,target_type",
+    [("bigquery", "DATE"), ("postgresql", "DATE"), ("sqlite", "DATETIME")],
+)
+def test_temporal_digit_filter_outside_epoch_ms_range_is_not_coerced(
+    engine: str,
+    target_type: str,
+    value: int | str,
+) -> None:
+    """
+    Only values in the JavaScript epoch-milliseconds range are coerced to
+    temporal literals. Shorter digit values (``YYYYMMDD``, bare years, epoch
+    seconds) are passed through unchanged instead of becoming 1970 literals.
+    """
+    from superset.db_engine_specs.base import BaseEngineSpec
+    from superset.db_engine_specs.bigquery import BigQueryEngineSpec
+    from superset.db_engine_specs.postgres import PostgresEngineSpec
+    from superset.db_engine_specs.sqlite import SqliteEngineSpec
+    from superset.models.helpers import ExploreMixin
+
+    engine_specs: dict[str, type[BaseEngineSpec]] = {
+        "bigquery": BigQueryEngineSpec,
+        "postgresql": PostgresEngineSpec,
+        "sqlite": SqliteEngineSpec,
+    }
+    db_engine_spec = engine_specs[engine]
+
+    result = ExploreMixin.filter_values_handler(
+        values=value,
+        operator=FilterOperator.GREATER_THAN_OR_EQUALS,
+        target_generic_type=GenericDataType.TEMPORAL,
+        target_native_type=target_type,
+        db_engine_spec=db_engine_spec,
+    )
+
+    assert "1970" not in str(result)
+    if abs(int(value)) >= 10**11:
+        assert isinstance(result, ColumnElement)
+        assert "2023-11-14" in str(result)
+    else:
+        assert result == value
+
+
+def test_get_sqla_query_temporal_digit_date_literal_is_not_coerced(
+    database: Database,
+) -> None:
+    """
+    A ``YYYYMMDD`` value in a SIMPLE adhoc filter on a temporal column reaches
+    the database unchanged rather than being reinterpreted as epoch ms (1970).
+    """
+    from superset.connectors.sqla.models import SqlaTable, TableColumn
+
+    table = SqlaTable(
+        database=database,
+        schema=None,
+        table_name="t",
+        columns=[TableColumn(column_name="ds", type="DATETIME", is_dttm=True)],
+    )
+
+    def compile_filter(val: str) -> str:
+        sqla_query = table.get_sqla_query(
+            columns=["ds"],
+            filter=[{"col": "ds", "op": ">=", "val": val}],
+            extras={},
+            is_timeseries=False,
+            metrics=[],
+        )
+        with database.get_sqla_engine() as engine:
+            return str(
+                sqla_query.sqla_query.compile(
+                    dialect=engine.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+
+    sql = compile_filter("20231114")
+    assert "1970" not in sql
+    assert "ds >= '20231114'" in sql
+
+    sql = compile_filter("1700000000000")
+    assert "ds >= '2023-11-14 22:13:20'" in sql
+
+
 def test_simple_metric_quotes_column_requiring_quoting(database: Database) -> None:
     """
     Regression for #30637: a SIMPLE adhoc metric that aggregates a column whose
