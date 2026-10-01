@@ -263,3 +263,21 @@ def test_contribution_on_decimal_columns_with_nulls():
     )
     assert processed_df["label"].tolist() == ["x", "y", "z"]
     assert processed_df["a"].tolist() == [0.25, 0.0, 0.75]
+
+
+def test_contribution_row_zero_sum() -> None:
+    df = DataFrame({"a": [5.0, 0.0, 1.0], "b": [-5.0, 0.0, 2.0]})
+    processed_df = contribution(
+        df, orientation=PostProcessingContributionOrientation.ROW
+    )
+    assert_array_equal(processed_df["a"].tolist(), [nan, nan, 1 / 3])
+    assert_array_equal(processed_df["b"].tolist(), [nan, nan, 2 / 3])
+
+
+def test_contribution_column_zero_sum() -> None:
+    df = DataFrame({"a": [5.0, -5.0, 0.0], "b": [1.0, 3.0, 0.0]})
+    processed_df = contribution(
+        df, orientation=PostProcessingContributionOrientation.COLUMN
+    )
+    assert_array_equal(processed_df["a"].tolist(), [nan, nan, nan])
+    assert_array_equal(processed_df["b"].tolist(), [0.25, 0.75, 0.0])
