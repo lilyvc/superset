@@ -570,9 +570,13 @@ class BigQueryEngineSpec(BaseEngineSpec):  # pylint: disable=too-many-public-met
             return query
 
         grain, fmt = PARTITION_ID_FORMATS[len(max_partition_id)]
-        column_type = next(
-            (col["type"] for col in columns or [] if col["name"] == partition_column),
-            None,
+        column_type = (
+            next(
+                (col["type"] for col in columns if col["name"] == partition_column),
+                None,
+            )
+            if isinstance(columns, list)
+            else None
         )
         col = column(partition_column)
         grain_ = literal_column(grain)
